@@ -1,0 +1,7 @@
+storage/
+storage/
+__pycache__/
+*.pyc
+.env
+venv/
+cloud.db
