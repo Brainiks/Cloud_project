@@ -823,30 +823,11 @@
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = 'cloud_files.zip';
+                a.download = 'cloud_files.zip'; // Имя будет переопределено сервером
                 document.body.appendChild(a);
                 a.click();
                 window.URL.revokeObjectURL(url);
                 document.body.removeChild(a);
-                
-                // Восстанавливаем исходный вид панели массовых действий
-                bulkActionsBar.innerHTML = `
-                    <span id="selectedCount">0 файлов выбрано</span>
-                    <div style="float: right;">
-                        <button class="secondary" onclick="downloadSelectedFiles()">
-                            <svg width="16" height="16" style="vertical-align: middle; margin-right: 5px;">
-                                <path d="M5 14h10v-2H5v2zm4-7h2V3h2l-3-3-3 3h2v4zm9 3H2v2h16v-2z" fill="currentColor"/>
-                            </svg>
-                            Скачать выбранные
-                        </button>
-                        <button class="danger" onclick="deleteSelectedFiles()">
-                            <svg width="16" height="16" style="vertical-align: middle; margin-right: 5px;">
-                                <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" fill="currentColor"/>
-                            </svg>
-                            Удалить выбранные
-                        </button>
-                    </div>
-                `;
                 
                 // Снимаем выделение
                 document.querySelectorAll('.file-checkbox').forEach(cb => {
@@ -868,50 +849,12 @@
                 }
                 
                 alert('Ошибка: ' + errorMsg);
-                
-                // Восстанавливаем исходный вид панели в случае ошибки
-                bulkActionsBar.innerHTML = `
-                    <span id="selectedCount">0 файлов выбрано</span>
-                    <div style="float: right;">
-                        <button class="secondary" onclick="downloadSelectedFiles()">
-                            <svg width="16" height="16" style="vertical-align: middle; margin-right: 5px;">
-                                <path d="M5 14h10v-2H5v2zm4-7h2V3h2l-3-3-3 3h2v4zm9 3H2v2h16v-2z" fill="currentColor"/>
-                            </svg>
-                            Скачать выбранные
-                        </button>
-                        <button class="danger" onclick="deleteSelectedFiles()">
-                            <svg width="16" height="16" style="vertical-align: middle; margin-right: 5px;">
-                                <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" fill="currentColor"/>
-                            </svg>
-                            Удалить выбранные
-                        </button>
-                    </div>
-                `;
-                updateBulkActionsBar();
+                bulkActionsBar.style.display = 'none';
             }
         } catch (err) {
             console.error(err);
             alert('Ошибка сети: ' + err.message);
-            
-            // Восстанавливаем исходный вид панели в случае ошибки сети
-            bulkActionsBar.innerHTML = `
-                <span id="selectedCount">0 файлов выбрано</span>
-                <div style="float: right;">
-                    <button class="secondary" onclick="downloadSelectedFiles()">
-                        <svg width="16" height="16" style="vertical-align: middle; margin-right: 5px;">
-                            <path d="M5 14h10v-2H5v2zm4-7h2V3h2l-3-3-3 3h2v4zm9 3H2v2h16v-2z" fill="currentColor"/>
-                        </svg>
-                        Скачать выбранные
-                    </button>
-                    <button class="danger" onclick="deleteSelectedFiles()">
-                        <svg width="16" height="16" style="vertical-align: middle; margin-right: 5px;">
-                            <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" fill="currentColor"/>
-                        </svg>
-                        Удалить выбранные
-                    </button>
-                </div>
-            `;
-            updateBulkActionsBar();
+            bulkActionsBar.style.display = 'none';
         }
     }
 

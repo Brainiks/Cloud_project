@@ -309,30 +309,16 @@ def upload_file():
         logger.info(f"Файл успешно загружен: {filepath}, размер: {size} байт")
         saved_files.append(filename)
 
-    return jsonify({'message': f'Загружено {len(saved_files)} файл(ов)', 'files': [original_filename for _ in saved_files]})
+    return jsonify({'message': f'Загружено {len(saved_files)} файл(ов)', 'files': saved_files})
 
 @app.route('/delete/<path:filename>', methods=['DELETE'])
 def delete_file(filename):
-    """Удаление файла"""
     if 'user_id' not in session:
         return jsonify({'error': 'Требуется авторизация'}), 401
 
     user_id = session['user_id']
+    safe_filename = secure_filename(filename)
     user_dir = os.path.join(STORAGE_PATH, str(user_id))
-
-    # Ищем файл в БД по оригинальному имени
-    with get_db() as conn:
-        file_record = conn.execute(
-            'SELECT filename FROM files WHERE user_id = ? AND original_filename = ?',
-            (user_id, filename)
-        ).fetchone()
-    
-    if not file_record:
-        logger.warning(f"Файл не найден в БД: {filename}")
-        return jsonify({'error': 'Файл не найден'}), 404
-    
-    # Используем безопасное имя для поиска на диске
-    safe_filename = file_record['filename']
     filepath = os.path.join(user_dir, safe_filename)
 
     logger.info(f"Попытка удаления файла: {filepath}")
@@ -353,45 +339,14 @@ def delete_file(filename):
     # Удаляем запись из БД
     with get_db() as conn:
         cur = conn.execute(
-            'DELETE FROM files WHERE user_id = ? AND original_filename = ?',
-            (user_id, filename)
+            'DELETE FROM files WHERE user_id = ? AND filename = ?',
+            (user_id, safe_filename)
         )
         if cur.rowcount == 0:
-            logger.warning(f"Запись о файле отсутствует в БД: {filename}")
+            logger.warning(f"Запись о файле отсутствует в БД: {safe_filename}")
 
     return jsonify({'message': 'Файл удалён'})
 
-
-
-@app.route('/download/<path:filename>')
-def download_file(filename):
-    """Скачивание одного файла"""
-    if 'user_id' not in session:
-        return jsonify({'error': 'Требуется авторизация'}), 401
-
-    user_id = session['user_id']
-    user_dir = os.path.join(STORAGE_PATH, str(user_id))
-
-    # Ищем файл в БД по оригинальному имени
-    with get_db() as conn:
-        file_record = conn.execute(
-            'SELECT filename FROM files WHERE user_id = ? AND original_filename = ?',
-            (user_id, filename)
-        ).fetchone()
-    
-    if not file_record:
-        logger.error(f"Файл не найден в БД: {filename}")
-        return jsonify({'error': 'Файл не найден'}), 404
-    
-    # Используем безопасное имя для поиска на диске
-    safe_filename = file_record['filename']
-    filepath = os.path.join(user_dir, safe_filename)
-
-    if not os.path.exists(filepath):
-        logger.error(f"Файл не найден на диске: {filepath}")
-        return jsonify({'error': 'Файл не найден'}), 404
-
-    return send_from_directory(user_dir, safe_filename, as_attachment=True)
 
 
 @app.route('/download-multiple', methods=['POST'])
