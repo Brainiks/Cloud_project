@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Облако — Cloud Project</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="header">
+        <h1>Облако — Cloud Project</h1>
+        <div>
+            <span>Добро пожаловать, {{ username }}!</span>
+            <a href="{{ url_for('logout') }}"><button class="danger">Выйти</button></a>
+        </div>
+    </div>
+
+    <div id="dropZone" class="upload-area">
+        <p>Перетащите файлы сюда или нажмите для выбора</p>
+        <input type="file" id="fileInput" multiple>
+        <button class="primary" onclick="document.getElementById('fileInput').click()">Выбрать файлы</button>
+    </div>
+
+    <div id="previewContainer" class="preview-container" style="display: none;">
+        <div class="preview-title">Выбранные файлы для загрузки:</div>
+        <div id="filePreviewList"></div>
+        <button class="secondary" onclick="clearSelectedFiles()">Очистить выбор</button>
+        <button class="primary" onclick="uploadFiles()">Загрузить все</button>
+    </div>
+
+    <div id="uploadProgressContainer" style="display: none;">
+        <h3 id="progressTitle">Загрузка файлов...</h3>
+        <div class="progress-container">
+            <div id="progressBar" class="progress-bar">
+                <span id="progressText" class="progress-text">0%</span>
+            </div>
+        </div>
+        <div class="progress-details">
+            <span id="progressFiles">0 из 0 файлов</span>
+            <span id="progressSpeed">0 КБ/с</span>
+        </div>
+    </div>
+
+    <div id="status"></div>
+
+    <div id="fileTableContainer">
+        <h2>Мои файлы</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Имя файла</th>
+                    <th>Размер</th>
+                    <th>Дата загрузки</th>
+                    <th>Действия</th>
+                </tr>
+            </thead>
+            <tbody id="fileTableBody">
+            </tbody>
+        </table>
+        <div id="noFilesMessage" style="display: none;">Нет загруженных файлов</div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>

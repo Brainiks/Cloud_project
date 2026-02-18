@@ -9,12 +9,14 @@ from flask import send_file
 import zipfile
 from io import BytesIO
 import json
+
 # Настраиваем логирование
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('cloud_project')
 
-app = Flask(__name__, static_folder='../frontend', template_folder='../frontend')
-app.secret_key = 'cloud-project-secret-key-2026'  # В продакшене используйте более надёжный ключ
+# ИСПРАВЛЕНО: __name__, static_folder='static', template_folder='templates'
+app = Flask(__name__, static_folder='static', template_folder='templates')
+app.secret_key = 'cloud-project-secret-key-2026'
 
 # Используем абсолютные пути для надёжности
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -37,22 +39,22 @@ def get_db():
 def init_db():
     with get_db() as conn:
         conn.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT UNIQUE NOT NULL,
-                password_hash TEXT NOT NULL
-            )
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL
+        )
         ''')
         conn.execute('''
-            CREATE TABLE IF NOT EXISTS files (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                path TEXT NOT NULL,
-                filename TEXT NOT NULL,       -- безопасное имя файла для хранения
-                original_filename TEXT NOT NULL, -- оригинальное имя файла
-                size INTEGER,
-                uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
+        CREATE TABLE IF NOT EXISTS files (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            path TEXT NOT NULL,
+            filename TEXT NOT NULL,
+            original_filename TEXT NOT NULL,
+            size INTEGER,
+            uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
         ''')
     logger.info("База данных инициализирована")
 
@@ -68,16 +70,15 @@ def register():
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
-
+        
         if not username or not password:
             return jsonify({'error': 'Имя пользователя и пароль обязательны'}), 400
-
-        # Проверка на допустимые символы в имени пользователя
+        
         if not username.replace('_', '').isalnum():
             return jsonify({'error': 'Имя пользователя может содержать только буквы, цифры и символ подчеркивания'}), 400
-
+        
         hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
-
+        
         try:
             with get_db() as conn:
                 conn.execute(
@@ -85,28 +86,31 @@ def register():
                     (username, hashed)
                 )
             logger.info(f"Создан новый пользователь: {username}")
-            return redirect(url_for('index'))
+            # ИСПРАВЛЕНО: возвращаем JSON вместо redirect
+            return jsonify({'success': True, 'message': 'Регистрация успешна'})
         except sqlite3.IntegrityError:
             logger.warning(f"Попытка создания дубликата пользователя: {username}")
             return jsonify({'error': 'Пользователь уже существует'}), 400
-
+    
     return render_template('register.html')
+
 
 @app.route('/login', methods=['POST'])
 def login():
     username = request.form.get('username', '').strip()
     password = request.form.get('password', '')
-
+    
     with get_db() as conn:
         user = conn.execute(
             'SELECT id, password_hash FROM users WHERE username = ?', (username,)
         ).fetchone()
-
+    
     if user and bcrypt.checkpw(password.encode('utf-8'), user['password_hash']):
         session['user_id'] = user['id']
         session['username'] = username
         logger.info(f"Пользователь вошёл в систему: {username}")
-        return redirect(url_for('index'))
+        # ИСПРАВЛЕНО: возвращаем JSON вместо redirect
+        return jsonify({'success': True, 'message': 'Вход выполнен успешно'})
     else:
         logger.warning(f"Неудачная попытка входа для пользователя: {username}")
         return jsonify({'error': 'Неверное имя или пароль'}), 401
@@ -118,112 +122,18 @@ def logout():
     logger.info(f"Пользователь вышел из системы: {username}")
     return redirect(url_for('index'))
 
-
-@app.route('/sync', methods=['POST'])
-def sync_files():
-    """Синхронизация файловой системы с базой данных"""
-    if 'user_id' not in session:
-        return jsonify({'error': 'Требуется авторизация'}), 401
-
-    user_id = session['user_id']
-    user_dir = os.path.join(STORAGE_PATH, str(user_id))
-    
-    # Создаём директорию, если её нет
-    os.makedirs(user_dir, exist_ok=True)
-    
-    added_count = 0
-    removed_count = 0
-    existing_count = 0
-
-    try:
-        # Получаем список файлов из БД
-        with get_db() as conn:
-            db_files = conn.execute(
-                'SELECT filename, original_filename FROM files WHERE user_id = ?',
-                (user_id,)
-            ).fetchall()
-            
-            db_filenames = {row['filename'] for row in db_files}
-            db_original_names = {row['original_filename']: row['filename'] for row in db_files}
-            
-            # Сканируем директорию пользователя
-            if os.path.exists(user_dir):
-                for root, dirs, files in os.walk(user_dir):
-                    for filename in files:
-                        filepath = os.path.join(root, filename)
-                        
-                        # Пропускаем служебные файлы
-                        if filename.startswith('.') or filename == 'desktop.ini':
-                            continue
-                        
-                        # Если файл уже есть в БД
-                        if filename in db_filenames:
-                            existing_count += 1
-                            continue
-                        
-                        # Добавляем новый файл в БД
-                        size = os.path.getsize(filepath)
-                        
-                        # Вычисляем относительный путь
-                        rel_path = os.path.relpath(filepath, user_dir)
-                        db_path = f"/{user_id}/{rel_path}"
-                        
-                        # Определяем оригинальное имя (если имя было изменено при загрузке)
-                        original_filename = filename
-                        if filename in db_original_names.values():
-                            # Ищем соответствующее оригинальное имя
-                            for orig, safe in db_original_names.items():
-                                if safe == filename:
-                                    original_filename = orig
-                                    break
-                        
-                        # Добавляем в БД
-                        conn.execute(
-                            '''INSERT INTO files (user_id, path, filename, original_filename, size)
-                               VALUES (?, ?, ?, ?, ?)''',
-                            (user_id, db_path, filename, original_filename, size)
-                        )
-                        added_count += 1
-                        logger.info(f"Добавлен файл в БД: {filename}")
-            
-            # Удаляем из БД записи о несуществующих файлах
-            for db_file in db_files:
-                filepath = os.path.join(user_dir, db_file['filename'])
-                if not os.path.exists(filepath):
-                    conn.execute(
-                        'DELETE FROM files WHERE user_id = ? AND filename = ?',
-                        (user_id, db_file['filename'])
-                    )
-                    removed_count += 1
-                    logger.warning(f"Удалена запись о несуществующем файле: {db_file['filename']}")
-        
-        return jsonify({
-            'message': 'Синхронизация завершена',
-            'added': added_count,
-            'removed': removed_count,
-            'existing': existing_count
-        })
-        
-    except Exception as e:
-        logger.error(f"Ошибка синхронизации: {str(e)}")
-        return jsonify({'error': f'Ошибка синхронизации: {str(e)}'}), 500
-
-
-
 @app.route('/files')
 def list_files():
     if 'user_id' not in session:
         return jsonify({'error': 'Требуется авторизация'}), 401
-
+    
     user_id = session['user_id']
     user_dir = os.path.join(STORAGE_PATH, str(user_id))
     valid_files = []
-
-    # Убеждаемся, что директория пользователя существует
+    
     os.makedirs(user_dir, exist_ok=True)
-
+    
     with get_db() as conn:
-        # Получаем файлы с оригинальными именами
         files = conn.execute(
             '''SELECT id, filename, original_filename, size, uploaded_at 
                FROM files 
@@ -231,74 +141,57 @@ def list_files():
                ORDER BY uploaded_at DESC''',
             (user_id,)
         ).fetchall()
-
-        # Проверяем каждый файл на существование и синхронизируем с БД
+        
         for row in files:
-            # Используем безопасное имя для проверки на диске
             filepath = os.path.join(user_dir, row['filename'])
             
             if os.path.exists(filepath):
-                # Возвращаем оригинальное имя для отображения в интерфейсе
                 valid_files.append({
                     'filename': row['original_filename'] if row['original_filename'] else row['filename'],
                     'size': row['size'],
                     'uploaded_at': row['uploaded_at']
                 })
             else:
-                # Удаляем "битую" запись из БД
-                logger.warning(f"Файл не найден на диске, удаляем запись из БД: {row['filename']}")
-                conn.execute(
-                    'DELETE FROM files WHERE id = ?',
-                    (row['id'],)
-                )
-
+                conn.execute('DELETE FROM files WHERE id = ?', (row['id'],))
+    
     return jsonify(valid_files)
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
     if 'user_id' not in session:
         return jsonify({'error': 'Требуется авторизация'}), 401
-
+    
     user_id = session['user_id']
     user_dir = os.path.join(STORAGE_PATH, str(user_id))
     os.makedirs(user_dir, exist_ok=True)
-
+    
     if 'files' not in request.files:
         return jsonify({'error': 'Файлы не найдены в запросе'}), 400
-
+    
     files = request.files.getlist('files')
     if not files or all(f.filename == '' for f in files):
         return jsonify({'error': 'Ни один файл не выбран'}), 400
-
+    
     saved_files = []
     for file in files:
         if file.filename == '':
             continue
-            
+        
         original_filename = file.filename
         filename = secure_filename(original_filename)
         filepath = os.path.join(user_dir, filename)
-
-        # Избегаем перезаписи: добавляем суффикс, если файл существует
+        
         counter = 1
         base, ext = os.path.splitext(filename)
         while os.path.exists(filepath):
             filename = f"{base} ({counter}){ext}"
             filepath = os.path.join(user_dir, filename)
             counter += 1
-
-        # Сохраняем файл
-        file.save(filepath)
         
-        # Проверяем, что файл действительно сохранён
-        if not os.path.exists(filepath):
-            logger.error(f"Ошибка сохранения файла: {filepath}")
-            return jsonify({'error': 'Ошибка сохранения файла на диск'}), 500
-            
+        file.save(filepath)
         size = os.path.getsize(filepath)
         relative_path = f"/{user_id}/{filename}"
-
-        # Сохраняем метаданные
+        
         with get_db() as conn:
             conn.execute(
                 '''INSERT INTO files (user_id, path, filename, original_filename, size)
@@ -306,21 +199,18 @@ def upload_file():
                 (user_id, relative_path, filename, original_filename, size)
             )
         
-        logger.info(f"Файл успешно загружен: {filepath}, размер: {size} байт")
         saved_files.append(filename)
-
-    return jsonify({'message': f'Загружено {len(saved_files)} файл(ов)', 'files': [original_filename for _ in saved_files]})
+    
+    return jsonify({'message': f'Загружено {len(saved_files)} файл(ов)'})
 
 @app.route('/delete/<path:filename>', methods=['DELETE'])
 def delete_file(filename):
-    """Удаление файла"""
     if 'user_id' not in session:
         return jsonify({'error': 'Требуется авторизация'}), 401
-
+    
     user_id = session['user_id']
     user_dir = os.path.join(STORAGE_PATH, str(user_id))
-
-    # Ищем файл в БД по оригинальному имени
+    
     with get_db() as conn:
         file_record = conn.execute(
             'SELECT filename FROM files WHERE user_id = ? AND original_filename = ?',
@@ -328,51 +218,32 @@ def delete_file(filename):
         ).fetchone()
     
     if not file_record:
-        logger.warning(f"Файл не найден в БД: {filename}")
         return jsonify({'error': 'Файл не найден'}), 404
     
-    # Используем безопасное имя для поиска на диске
     safe_filename = file_record['filename']
     filepath = os.path.join(user_dir, safe_filename)
-
-    logger.info(f"Попытка удаления файла: {filepath}")
-
-    # Проверяем, существует ли файл
+    
     if not os.path.exists(filepath):
-        logger.warning(f"Файл для удаления не найден: {filepath}")
         return jsonify({'error': 'Файл не найден'}), 404
-
-    # Удаляем файл с диска
-    try:
-        os.remove(filepath)
-        logger.info(f"Файл удалён с диска: {filepath}")
-    except OSError as e:
-        logger.error(f"Ошибка удаления файла: {filepath}, ошибка: {str(e)}")
-        return jsonify({'error': f'Ошибка удаления файла: {str(e)}'}), 500
-
-    # Удаляем запись из БД
+    
+    os.remove(filepath)
+    
     with get_db() as conn:
-        cur = conn.execute(
+        conn.execute(
             'DELETE FROM files WHERE user_id = ? AND original_filename = ?',
             (user_id, filename)
         )
-        if cur.rowcount == 0:
-            logger.warning(f"Запись о файле отсутствует в БД: {filename}")
-
+    
     return jsonify({'message': 'Файл удалён'})
-
-
 
 @app.route('/download/<path:filename>')
 def download_file(filename):
-    """Скачивание одного файла"""
     if 'user_id' not in session:
         return jsonify({'error': 'Требуется авторизация'}), 401
-
+    
     user_id = session['user_id']
     user_dir = os.path.join(STORAGE_PATH, str(user_id))
-
-    # Ищем файл в БД по оригинальному имени
+    
     with get_db() as conn:
         file_record = conn.execute(
             'SELECT filename FROM files WHERE user_id = ? AND original_filename = ?',
@@ -380,126 +251,19 @@ def download_file(filename):
         ).fetchone()
     
     if not file_record:
-        logger.error(f"Файл не найден в БД: {filename}")
         return jsonify({'error': 'Файл не найден'}), 404
     
-    # Используем безопасное имя для поиска на диске
     safe_filename = file_record['filename']
     filepath = os.path.join(user_dir, safe_filename)
-
+    
     if not os.path.exists(filepath):
-        logger.error(f"Файл не найден на диске: {filepath}")
         return jsonify({'error': 'Файл не найден'}), 404
-
+    
     return send_from_directory(user_dir, safe_filename, as_attachment=True)
 
-
-@app.route('/download-multiple', methods=['POST'])
-def download_multiple_files():
-    """Скачивание нескольких файлов в одном архиве"""
-    if 'user_id' not in session:
-        return jsonify({'error': 'Требуется авторизация'}), 401
-
-    user_id = session['user_id']
-    user_dir = os.path.join(STORAGE_PATH, str(user_id))
-    
-    # Получаем список файлов из тела запроса
-    try:
-        data = request.get_json()
-        if not data or 'filenames' not in data:
-            return jsonify({'error': 'Не указан список файлов'}), 400
-        
-        original_filenames = data['filenames']
-        if not isinstance(original_filenames, list) or len(original_filenames) == 0:
-            return jsonify({'error': 'Список файлов пуст'}), 400
-    except Exception as e:
-        logger.error(f"Ошибка разбора данных запроса: {str(e)}")
-        return jsonify({'error': 'Неверный формат запроса'}), 400
-
-    # Проверяем, что пользователь не пытается скачать слишком много файлов
-    if len(original_filenames) > 100:
-        return jsonify({'error': 'Максимальное количество файлов для скачивания: 100'}), 400
-
-    # Создаём буфер для ZIP-архива
-    zip_buffer = BytesIO()
-    
-    files_added = 0
-    files_not_found = []
-
-    try:
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            for original_filename in original_filenames:
-                # Ищем файл в БД по оригинальному имени
-                with get_db() as conn:
-                    file_record = conn.execute(
-                        'SELECT filename, original_filename FROM files WHERE user_id = ? AND original_filename = ?',
-                        (user_id, original_filename)
-                    ).fetchone()
-                
-                # Если файл не найден в БД
-                if not file_record:
-                    files_not_found.append(original_filename)
-                    logger.warning(f"Файл не найден в БД: {original_filename}")
-                    continue
-                
-                # Используем безопасное имя для поиска на диске
-                safe_filename = file_record['filename']
-                filepath = os.path.join(user_dir, safe_filename)
-                
-                # Проверяем существование файла на диске
-                if not os.path.exists(filepath):
-                    files_not_found.append(original_filename)
-                    logger.warning(f"Файл не найден на диске: {filepath}")
-                    continue
-                
-                # Добавляем файл в архив с оригинальным именем
-                try:
-                    zip_file.write(filepath, arcname=original_filename)
-                    files_added += 1
-                    logger.info(f"Файл добавлен в архив: {original_filename} (на диске: {safe_filename})")
-                except Exception as e:
-                    logger.error(f"Ошибка добавления файла {original_filename} в архив: {str(e)}")
-                    continue
-        
-        # Если ни один файл не был добавлен
-        if files_added == 0:
-            if files_not_found:
-                return jsonify({
-                    'error': f'Ни один из указанных файлов не найден',
-                    'not_found': files_not_found
-                }), 404
-            return jsonify({'error': 'Не удалось создать архив'}), 500
-        
-        # Если некоторые файлы не найдены, но другие успешно добавлены
-        if files_not_found:
-            logger.warning(f"Некоторые файлы не найдены: {files_not_found}")
-        
-        # Подготавливаем ответ
-        zip_buffer.seek(0)
-        
-        # Генерируем имя архива
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        archive_name = f'cloud_files_{timestamp}.zip'
-        
-        logger.info(f"Создан архив {archive_name} с {files_added} файлами")
-        
-        return send_file(
-            zip_buffer,
-            mimetype='application/zip',
-            as_attachment=True,
-            download_name=archive_name
-        )
-        
-    except Exception as e:
-        logger.error(f"Ошибка создания архива: {str(e)}")
-        return jsonify({'error': f'Ошибка создания архива: {str(e)}'}), 500
-
-
-
-
+# ИСПРАВЛЕНО: __name__ == '__main__'
 if __name__ == '__main__':
     init_db()
     logger.info("Сервер запускается...")
-    logger.info(f"Веб-интерфейс доступен по адресу: http://127.0.0.1:5000")
-    logger.info(f"Файлы будут сохраняться в: {STORAGE_PATH}")
+    logger.info(f"Веб-интерфейс: http://127.0.0.1:5000")
     app.run(host='127.0.0.1', port=5000, debug=True)
