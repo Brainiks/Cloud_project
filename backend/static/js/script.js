@@ -239,6 +239,7 @@ function uploadFiles() {
 }
 
 // Загрузка списка файлов с сервера
+// Загрузка списка файлов с сервера
 async function loadFileList() {
     try {
         const response = await fetch('/files');
@@ -246,7 +247,6 @@ async function loadFileList() {
             throw new Error('Не удалось загрузить файлы');
         }
         const files = await response.json();
-
         const tbody = document.getElementById('fileTableBody');
         const noFilesMsg = document.getElementById('noFilesMessage');
         tbody.innerHTML = '';
@@ -259,8 +259,23 @@ async function loadFileList() {
         noFilesMsg.style.display = 'none';
         files.forEach(file => {
             const row = document.createElement('tr');
+            
+            // ИСПРАВЛЕНО: Добавляем иконку файла по расширению
+            let icon = '📄';
+            if (file.filename.match(/\.(jpg|jpeg|png|gif|bmp|webp)$/i)) icon = '🖼️';
+            else if (file.filename.match(/\.(mp4|avi|mkv|mov|webm)$/i)) icon = '🎬';
+            else if (file.filename.match(/\.(mp3|wav|ogg|flac)$/i)) icon = '🎵';
+            else if (file.filename.match(/\.(pdf)$/i)) icon = '📕';
+            else if (file.filename.match(/\.(zip|rar|7z|tar|gz)$/i)) icon = '📦';
+            else if (file.filename.match(/\.(doc|docx)$/i)) icon = '📘';
+            else if (file.filename.match(/\.(xls|xlsx)$/i)) icon = '📗';
+            else if (file.filename.match(/\.(ppt|pptx)$/i)) icon = '📙';
+            
             row.innerHTML = `
-                <td>${escapeHtml(file.filename)}</td>
+                <td>
+                    <span style="margin-right: 8px;">${icon}</span>
+                    ${escapeHtml(file.filename)}
+                </td>
                 <td style="text-align: right;">${formatBytes(file.size)}</td>
                 <td>${new Date(file.uploaded_at).toLocaleString('ru-RU')}</td>
                 <td style="text-align: center;">
@@ -278,7 +293,6 @@ async function loadFileList() {
             `<span class="status-error">Ошибка загрузки файлов: ${err.message}</span>`;
     }
 }
-
 // Скачивание файла
 function downloadFile(filename) {
     window.location.href = `/download/${encodeURIComponent(filename)}`;

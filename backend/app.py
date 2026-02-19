@@ -126,13 +126,12 @@ def logout():
 def list_files():
     if 'user_id' not in session:
         return jsonify({'error': 'Требуется авторизация'}), 401
-    
     user_id = session['user_id']
     user_dir = os.path.join(STORAGE_PATH, str(user_id))
     valid_files = []
-    
+
     os.makedirs(user_dir, exist_ok=True)
-    
+
     with get_db() as conn:
         files = conn.execute(
             '''SELECT id, filename, original_filename, size, uploaded_at 
@@ -147,13 +146,14 @@ def list_files():
             
             if os.path.exists(filepath):
                 valid_files.append({
+                    # Возвращаем original_filename для отображения пользователю
                     'filename': row['original_filename'] if row['original_filename'] else row['filename'],
                     'size': row['size'],
                     'uploaded_at': row['uploaded_at']
                 })
             else:
                 conn.execute('DELETE FROM files WHERE id = ?', (row['id'],))
-    
+
     return jsonify(valid_files)
 
 @app.route('/upload', methods=['POST'])
@@ -240,26 +240,33 @@ def delete_file(filename):
 def download_file(filename):
     if 'user_id' not in session:
         return jsonify({'error': 'Требуется авторизация'}), 401
-    
     user_id = session['user_id']
     user_dir = os.path.join(STORAGE_PATH, str(user_id))
-    
+
     with get_db() as conn:
+        # Получаем ОБА имени: безопасное (на диске) и оригинальное (для скачивания)
         file_record = conn.execute(
-            'SELECT filename FROM files WHERE user_id = ? AND original_filename = ?',
+            'SELECT filename, original_filename FROM files WHERE user_id = ? AND original_filename = ?',
             (user_id, filename)
         ).fetchone()
-    
+
     if not file_record:
         return jsonify({'error': 'Файл не найден'}), 404
-    
+
     safe_filename = file_record['filename']
+    original_filename = file_record['original_filename']
     filepath = os.path.join(user_dir, safe_filename)
-    
+
     if not os.path.exists(filepath):
         return jsonify({'error': 'Файл не найден'}), 404
-    
-    return send_from_directory(user_dir, safe_filename, as_attachment=True)
+
+    # ИСПРАВЛЕНО: используем send_file с download_name для сохранения оригинального имени
+    from flask import send_file
+    return send_file(
+        filepath,
+        as_attachment=True,
+        download_name=original_filename  # Сохраняем оригинальное имя с расширением
+    )
 
 # ИСПРАВЛЕНО: __name__ == '__main__'
 if __name__ == '__main__':
